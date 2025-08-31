@@ -1,0 +1,82 @@
+version: '3.9'
+
+services:
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: govmate
+      POSTGRES_PASSWORD: govmate
+      POSTGRES_DB: govmate
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+
+  api:
+    build:
+      context: .
+      dockerfile: services/api/Dockerfile
+    depends_on:
+      - db
+      - ollama
+    environment:
+      DATABASE_URL: postgresql+psycopg2://govmate:govmate@db:5432/govmate
+      REDIS_URL: redis://redis:6379/0
+      PYTHONUNBUFFERED: 1
+    volumes:
+      - ./services/api:/app/services/api
+      - ./services/etl:/app/services/etl
+      - ./data:/app/data
+      - ./datasets:/app/datasets
+    ports:
+      - "8000:8000"
+    command: python services/api/main_final.py
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    depends_on:
+      - api
+    environment:
+      NEXT_PUBLIC_API_BASE: http://api:8000/v1
+      # Override any .env file settings
+      DATABASE_URL: null
+      REDIS_URL: null
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./apps/web:/app/apps/web
+
+  worker:
+    build:
+      context: .
+      dockerfile: services/worker/Dockerfile
+    depends_on:
+      - db
+      - api
+      - redis
+    environment:
+      DATABASE_URL: postgresql+psycopg2://govmate:govmate@db:5432/govmate
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      - ./services/worker:/app/services/worker
+      - ./data:/app/data
+
+volumes:
+  db_data:
+  ollama_data:
